@@ -60,18 +60,18 @@ class Server
 
   void connection(socket_ptr s)
   {
-    get_ins(s);
+    get_entry(s);
     listen();
   }
 
-  void get_ins(socket_ptr s)
+  void get_entry(socket_ptr s)
   {
     string_ptr ins(new string); // instruction
     ins->resize(16);
-    s->async_read_some(buffer(*ins), bind(&Server::parse, this, s, ins));
+    s->async_read_some(buffer(*ins), bind(&Server::parse_entry, this, s, ins));
   }
 
-  void parse(socket_ptr s, string_ptr ins)
+  void parse_entry(socket_ptr s, string_ptr ins)
   {
     if (startswith(*ins, "login"))
     {
@@ -85,7 +85,69 @@ class Server
       id->resize(64);
       s->async_read_some(buffer(*id), bind(&Server::enroll, this, s, id));
     }
-    else if (startswith(*ins, "tell"))
+    else
+    {
+      s->write_some(buffer("?"));
+      s->close();
+    }
+  }
+
+  void login(socket_ptr s, string_ptr id)
+  {
+    string::size_type a = id->find(" ");
+    string name = id->substr(0, a);
+    string password = id->substr(a + 1, id->substr(a + 1).find(" "));
+
+    switch (check_user(name, password))
+    {
+      case SUCCESS:
+        cc.emplace_back(co(name, s));
+        cout << "login in: " << name << endl;
+        s->async_write_some(
+          buffer("login in as: " + name), bind(&Server::get_ins, this, s));
+        break;
+      case WRONG_PASSWORD:
+        s->async_write_some(
+          buffer("wrong password: " + name), bind(&Server::get_entry, this, s));
+        break;
+      case NOT_REGISTERED:
+        s->async_write_some(
+          buffer("not registered"), bind(&Server::get_entry, this, s));
+        break;
+    }
+  }
+
+  void enroll(socket_ptr s, string_ptr id)
+  {
+    string::size_type a = id->find(" ");
+    string name = id->substr(0, a);
+    string password = id->substr(a + 1, id->substr(a + 1).find(" "));
+
+    if (check_user(name, password) == NOT_REGISTERED)
+    {
+      add_user(name, password);
+      s->async_write_some(buffer("registered as: " + name + ", please login"),
+        bind(&Server::get_entry, this, s));
+    }
+    else
+    {
+      s->async_write_some(
+        buffer("user " + name + " existed"), bind(&Server::get_entry, this, s));
+    }
+  }
+
+  // get instruction
+  void get_ins(socket_ptr s)
+  {
+    string_ptr ins(new string); // instruction
+    ins->resize(16);
+    s->async_read_some(buffer(*ins), bind(&Server::parse_ins, this, s, ins));
+  }
+
+  // parse instruction
+  void parse_ins(socket_ptr s, string_ptr ins)
+  {
+    if (startswith(*ins, "tell"))
     {
       string_ptr name(new string);
       name->resize(32);
@@ -93,6 +155,9 @@ class Server
     }
     else if (startswith(*ins, "shout"))
     {
+      string_ptr msg(new string); // message
+      msg->resize(1024);
+      s->async_read_some(buffer(*msg), bind(&Server::shout, this, s, msg));
     }
     else if (startswith(*ins, "list"))
     {
@@ -109,6 +174,7 @@ class Server
     }
     else if (startswith(*ins, "bye"))
     {
+      // TODO:
       s->write_some(buffer("bye"));
       s->close();
     }
@@ -117,6 +183,11 @@ class Server
       s->write_some(buffer("?"));
       s->close();
     }
+  }
+
+  void logout(socket_ptr s, string_ptr name)
+  {
+    // TODO:
   }
 
   void tell(socket_ptr s, string_ptr name)
@@ -133,63 +204,24 @@ class Server
         return;
       }
     }
-    s->async_write_some(buffer("not found"), bind(&Server::get_ins, this, s));
+    string msg =
+      find_user(n) ? ("user " + n + " offline") : ("unknown user: " + n);
+    s->async_write_some(buffer(msg), bind(&Server::get_ins, this, s));
   }
 
-  void login(socket_ptr s, string_ptr id)
+  void shout(socket_ptr s, string_ptr msg)
   {
-    string::size_type a = id->find(" ");
-    string name = id->substr(0, a);
-    string password = id->substr(a + 1, id->substr(a + 1).find(" "));
-
-    cout << "name: " << name << endl;
-    cout << "password: " << password << endl;
-    switch (check_user(name, password))
+    for (co c : cc)
     {
-      case SUCCESS:
-        {
-          cout << "login in success" << endl;
-          s->write_some(buffer("login in success"));
-          string_ptr ins(new string); // instruction
-          ins->resize(16);
-          s->async_read_some(buffer(*ins), bind(&Server::parse, this, s, ins));
-          cc.emplace_back(co(name, s));
-          break;
-        }
-      case WRONG_PASSWORD:
-        {
-          cout << "wrong password" << endl;
-          s->write_some(buffer("wrong password"));
-          break;
-        }
-      case NOT_REGISTERED:
-        {
-          cout << "not registered" << endl;
-          s->write_some(buffer("not registered"));
-          break;
-        }
+      c.s->write_some(buffer(*msg));
     }
+    get_ins(s);
   }
 
-  void enroll(socket_ptr s, string_ptr id)
+  void send_message(socket_ptr s, co c, string_ptr msg)
   {
-    string::size_type a = id->find(" ");
-    string name = id->substr(0, a);
-    string password = id->substr(a + 1, id->substr(a + 1).find(" "));
-
-    cout << "name: " << name << endl;
-    cout << "password: " << password << password.size() << endl;
-    if (check_user(name, password) == NOT_REGISTERED)
-    {
-      add_user(name, password);
-    }
-    else
-    {
-      // TODO:
-    }
+    c.s->async_write_some(buffer(*msg), bind(&Server::get_ins, this, s));
   }
-
-  void logout(socket_ptr s) {}
 
   USER_STATE check_user(string name, string password)
   {
@@ -214,16 +246,33 @@ class Server
     return NOT_REGISTERED;
   }
 
+  bool find_user(string name)
+  {
+    ifstream user("user");
+    string line;
+    while (getline(user, line))
+    {
+      if (line == "")
+      {
+        continue;
+      }
+      string::size_type p = line.find(" ");
+      string r_n = line.substr(0, p);
+      if (r_n == name)
+      {
+        user.close();
+        return true;
+      }
+    }
+    user.close();
+    return false;
+  }
+
   void add_user(string name, string password)
   {
     ofstream user("user", ios::app);
     user << endl << name << " " << password;
     user.close();
-  }
-
-  void send_message(socket_ptr s, co c, string_ptr msg)
-  {
-    c.s->async_write_some(buffer(*msg), bind(&Server::get_ins, this, s));
   }
 
   void run()
