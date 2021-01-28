@@ -57,9 +57,9 @@ int main()
 
   thread([ios_p]() { ios_p->run(); }).detach();
 
+  string name;
   while (s.is_open())
   {
-    string name;
     cout << ">>>";
     string ins; // instruction
     cin >> ins;

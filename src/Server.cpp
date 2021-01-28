@@ -102,9 +102,9 @@ class Server
     {
       case SUCCESS:
         cc.emplace_back(co(name, s));
-        cout << "login in: " << name << endl;
+        cout << "login: " << name << endl;
         s->async_write_some(
-          buffer("login in as: " + name), bind(&Server::get_ins, this, s));
+          buffer("login as: " + name), bind(&Server::get_ins, this, s));
         break;
       case WRONG_PASSWORD:
         s->async_write_some(
@@ -193,13 +193,15 @@ class Server
       if (i->name == n)
       {
         cc.erase(i);
-        s->write_some(buffer("bye"));
+        cout << "logout: " << n << endl;
         s->close();
-        return;
+        break;
       }
     }
-    s->write_some(buffer("bye"));
-    s->close();
+    for (co c : cc)
+    {
+      c.s->write_some(buffer(n + " logout"));
+    }
   }
 
   void tell(socket_ptr s, string_ptr name)
