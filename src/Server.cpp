@@ -112,7 +112,7 @@ class Server
         break;
       case NOT_REGISTERED:
         s->async_write_some(
-          buffer("not registered"), bind(&Server::get_entry, this, s));
+          buffer(name + " not registered"), bind(&Server::get_entry, this, s));
         break;
     }
   }
@@ -172,11 +172,11 @@ class Server
     {
       s->async_write_some(buffer("poi"), bind(&Server::get_ins, this, s));
     }
-    else if (startswith(*ins, "bye"))
+    else if (startswith(*ins, "logout"))
     {
-      // TODO:
-      s->write_some(buffer("bye"));
-      s->close();
+      string_ptr name(new string);
+      name->resize(32);
+      s->async_read_some(buffer(*name), bind(&Server::logout, this, s, name));
     }
     else
     {
@@ -187,7 +187,19 @@ class Server
 
   void logout(socket_ptr s, string_ptr name)
   {
-    // TODO:
+    string n = name->substr(0, name->find(" "));
+    for (auto i = cc.begin(); i < cc.end(); ++i)
+    {
+      if (i->name == n)
+      {
+        cc.erase(i);
+        s->write_some(buffer("bye"));
+        s->close();
+        return;
+      }
+    }
+    s->write_some(buffer("bye"));
+    s->close();
   }
 
   void tell(socket_ptr s, string_ptr name)

@@ -1,5 +1,5 @@
 CC = g++
-FLAG = -Wall -DUNICODE -std=c++11 -static -I./include
+FLAG = -Wall -DUNICODE -std=c++11 -I./include
 LIB = -lws2_32 -lwsock32
 
 SRC_DIR = ./src
